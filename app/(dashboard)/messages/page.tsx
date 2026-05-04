@@ -7,7 +7,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Card, CardHeader, PageLoading } from '@/components/ui';
 import { ErrorState, EmptyState } from '@/components/ui';
-import { useMessages, useTenant, useUpdateTenant } from '@/lib/hooks';
+import { useGroupedMessages, useTenant, useUpdateTenant } from '@/lib/hooks';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { MessageDTO, ViewMode, SortMode } from '@/lib/types';
 
@@ -21,7 +21,9 @@ const STORAGE_KEYS = {
 const DEFAULT_VIEW_MODE: ViewMode = 'grouped';
 const DEFAULT_SORT_MODE: SortMode = 'newest-first';
 
-function MessageBubble({ message, isFromMe }: { message: MessageDTO; isFromMe: boolean }) {
+function MessageBubble({ message }: { message: MessageDTO }) {
+  // Use sender field from grouped endpoint: 'user' = customer sent, 'bot' = bot replied
+  const isFromMe = message.sender === 'bot';
   const isToday = (date: string) => {
     const d = new Date(date);
     const today = new Date();
@@ -35,7 +37,7 @@ function MessageBubble({ message, isFromMe }: { message: MessageDTO; isFromMe: b
       }`}>
         <p className="text-sm">{message.message}</p>
         <div className={`text-xs mt-1 ${isFromMe ? 'text-blue-100' : 'text-gray-500'}`}>
-          {message.from} • {isToday(message.timestamp) 
+          {isToday(message.timestamp) 
             ? new Date(message.timestamp).toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' })
             : new Date(message.timestamp).toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit' }) + ' ' + new Date(message.timestamp).toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' })
           }
@@ -48,7 +50,7 @@ function MessageBubble({ message, isFromMe }: { message: MessageDTO; isFromMe: b
 function MessageGroup({ phone, messages }: { phone: string; messages: MessageDTO[] }) {
   const [expanded, setExpanded] = useState(false);
   const displayed = expanded ? messages : messages.slice(-3);
-  const myPhone = messages[0]?.to || '';
+  // sender: 'user' = customer message, 'bot' = bot response
 
   return (
     <div className="border-b border-gray-100">
@@ -67,7 +69,7 @@ function MessageGroup({ phone, messages }: { phone: string; messages: MessageDTO
       {expanded && (
         <div className="px-4 pb-4">
           {displayed.map((m, i) => (
-            <MessageBubble key={i} message={m} isFromMe={m.from === myPhone} />
+            <MessageBubble key={i} message={m} />
           ))}
         </div>
       )}
@@ -77,7 +79,8 @@ function MessageGroup({ phone, messages }: { phone: string; messages: MessageDTO
 
 // Flat view message component - shows all messages in chronological list
 function FlatMessageItem({ message }: { message: MessageDTO }) {
-  const isFromMe = message.from === message.to; // Simplified: if from equals to, it's outgoing
+  // Use sender field from grouped endpoint: 'user' = customer, 'bot' = bot
+  const isFromMe = message.sender === 'bot';
   const isToday = (date: string) => {
     const d = new Date(date);
     const today = new Date();
@@ -91,7 +94,11 @@ function FlatMessageItem({ message }: { message: MessageDTO }) {
       }`}>
         <p className="text-sm">{message.message}</p>
         <div className={`text-xs mt-1 ${isFromMe ? 'text-blue-100' : 'text-gray-500'}`}>
-          {message.from} → {message.to} • {isToday(message.timestamp) 
+          <span className={isFromMe ? 'text-blue-200' : 'text-green-600'}>
+            {message.sender === 'bot' ? '🤖' : '👤'}
+          </span>
+          {' '}
+          {isToday(message.timestamp) 
             ? new Date(message.timestamp).toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' })
             : new Date(message.timestamp).toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit' }) + ' ' + new Date(message.timestamp).toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' })
           }
@@ -128,7 +135,7 @@ function ToggleGroup({ options, value, onChange }: {
 
 export default function MessagesPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { data, isLoading, error, refetch } = useMessages({ page: 1, limit: 100 }, !authLoading && isAuthenticated);
+  const { data: groupedData, isLoading, error, refetch } = useGroupedMessages({ page: 1, limit: 100 }, !authLoading && isAuthenticated);
   
   // Tenant (conversation engine toggle)
   const { data: tenantData } = useTenant(!authLoading && isAuthenticated);
@@ -178,60 +185,56 @@ export default function MessagesPage() {
   };
 
   // Handle conversation engine toggle
+  const [toggleError, setToggleError] = useState<string | null>(null);
+  
   const handleToggleConversation = async (enabled: boolean) => {
+    setToggleError(null);
     try {
       await updateTenant.mutateAsync({ conversationEnabled: enabled });
     } catch (err) {
       console.error('Failed to toggle conversation engine:', err);
+      setToggleError('Error al cambiar el estado del bot');
+      setTimeout(() => setToggleError(null), 3000);
     }
   };
 
   if (authLoading) return <PageLoading />;
   if (!isAuthenticated) return <div className="p-4">Redirigiendo al login...</div>;
 
-  const allMessages = data?.data?.messages || [];
+  // Pre-grouped messages from API (GET /messages/grouped)
+  // Keys = customer phone numbers, Values = conversation messages (sorted newest first)
+  const groupedMessages = groupedData?.data || {};
   
-  // Sort messages based on sortMode
-  const sortedMessages = useMemo(() => {
-    if (allMessages.length === 0) return [];
-    
-    const messagesCopy = [...allMessages];
+  // Convert to array for rendering - sort by last message timestamp
+  const conversations = useMemo(() => {
+    const entries = Object.entries(groupedMessages);
     
     switch (sortMode) {
       case 'newest-first':
-        return messagesCopy.sort((a, b) => 
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        );
+        // Already sorted by API, just return
+        return entries;
       case 'oldest-first':
-        return messagesCopy.sort((a, b) => 
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        );
+        // Reverse the order within each group AND reverse group order
+        return entries.reverse();
       case 'by-contact':
-        return messagesCopy.sort((a, b) => {
-          const contactA = a.from || a.to || '';
-          const contactB = b.from || b.to || '';
-          return contactA.localeCompare(contactB);
-        });
+        // Sort alphabetically by phone number
+        return entries.sort(([phoneA], [phoneB]) => phoneA.localeCompare(phoneB));
       default:
-        return messagesCopy;
+        return entries;
     }
-  }, [allMessages, sortMode]);
+  }, [groupedMessages, sortMode]);
 
-  // Group messages by phone (for grouped view)
-  const grouped = useMemo(() => {
-    if (sortedMessages.length === 0) return {};
-    
-    return sortedMessages.reduce((acc: Record<string, MessageDTO[]>, msg) => {
-      const key = msg.from || msg.to;
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(msg);
-      // Sort by timestamp within each group
-      acc[key].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-      return acc;
-    }, {});
-  }, [sortedMessages]);
-
-  const conversations = Object.entries(grouped);
+  // Flatten all messages from all groups for flat view
+  const flatMessages = useMemo(() => {
+    const allMessages: MessageDTO[] = [];
+    Object.values(groupedMessages).forEach((msgs) => {
+      allMessages.push(...msgs);
+    });
+    // Sort by timestamp (newest first by default)
+    return allMessages.sort((a, b) => 
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }, [groupedMessages]);
 
   return (
     <div className="space-y-6">
@@ -261,6 +264,9 @@ export default function MessagesPage() {
           <span className={`text-xs font-medium ${conversationEnabled ? 'text-green-700' : 'text-gray-500'}`}>
             {conversationEnabled ? 'Activo' : 'Desactivado'}
           </span>
+          {toggleError && (
+            <span className="text-xs text-red-600">{toggleError}</span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -293,7 +299,7 @@ export default function MessagesPage() {
           title={viewMode === 'grouped' ? 'Conversaciones' : 'Todos los mensajes'} 
           subtitle={viewMode === 'grouped' 
             ? `${conversations.length} conversaciones` 
-            : `${sortedMessages.length} mensajes`
+            : `${flatMessages.length} mensajes`
           } 
         />
         {isLoading ? (
@@ -312,11 +318,11 @@ export default function MessagesPage() {
           )
         ) : (
           // Flat view - all messages in chronological list
-          sortedMessages.length === 0 ? (
+          flatMessages.length === 0 ? (
             <EmptyState title="Sin mensajes" message="No hay mensajes registrados" />
           ) : (
             <div className="p-4">
-              {sortedMessages.map((message, index) => (
+              {flatMessages.map((message, index) => (
                 <FlatMessageItem key={`${message.timestamp}-${index}`} message={message} />
               ))}
             </div>

@@ -92,10 +92,17 @@ export interface MessageDTO {
   to: string;
   message: string;
   timestamp: string; // ISO 8601
+  sender?: 'user' | 'bot'; // Present in grouped endpoint
 }
 
 export interface MessagesResponse {
   messages: MessageDTO[];
+}
+
+// Messages grouped (GET /messages/grouped)
+// Keys = customer phone numbers, Values = conversation messages
+export interface GroupedMessagesResponse {
+  [phone: string]: MessageDTO[];
 }
 
 // Orders (GET /orders)

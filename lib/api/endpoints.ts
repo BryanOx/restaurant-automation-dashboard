@@ -9,6 +9,7 @@ import type {
   AuthLoginRequest,
   AuthResponse,
   MessagesResponse,
+  GroupedMessagesResponse,
   OrderDTO,
   OrderStatsDTO,
   HealthResponse,
@@ -49,6 +50,14 @@ export const refreshToken = async (): Promise<AuthResponse> => {
 
 export const getMessages = async (params?: PaginationParams): Promise<ApiResponse<MessagesResponse>> => {
   return apiClient.get<ApiResponse<MessagesResponse>>('/messages', {
+    page: params?.page ?? 1,
+    limit: params?.limit ?? 20,
+  });
+};
+
+// GET /messages/grouped - Messages grouped by customer phone (conversation threads)
+export const getGroupedMessages = async (params?: PaginationParams): Promise<ApiResponse<GroupedMessagesResponse>> => {
+  return apiClient.get<ApiResponse<GroupedMessagesResponse>>('/messages/grouped', {
     page: params?.page ?? 1,
     limit: params?.limit ?? 20,
   });

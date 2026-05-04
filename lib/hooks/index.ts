@@ -2,7 +2,7 @@
 // Hooks index - Export all hooks
 // ============================================
 
-export { useMessages } from './useMessages';
+export { useMessages, useGroupedMessages } from './useMessages';
 export { useOrders, useCreateOrder, useUpdateOrderStatus } from './useOrders';
 export { useOrderStats, type StatsPeriod } from './useOrderStats';
 export { useSessionsHealth } from './useSessionsHealth';
