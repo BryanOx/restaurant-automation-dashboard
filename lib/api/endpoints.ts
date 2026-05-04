@@ -192,12 +192,12 @@ export const clearToken = () => apiClient.clearToken();
 // Tenant Endpoints
 // ============================================
 
-// GET /tenants/:id - Get current tenant settings (includes conversationEnabled)
+// GET /tenants - Get current tenant settings (includes conversationEnabled)
 export const getTenant = async (): Promise<ApiResponse<TenantDTO>> => {
-  return apiClient.get<ApiResponse<TenantDTO>>('/tenants/current');
+  return apiClient.get<ApiResponse<TenantDTO>>('/tenants');
 };
 
-// PATCH /tenants/:id - Update tenant settings (toggle conversationEnabled)
+// PATCH /tenants - Update tenant settings (toggle conversationEnabled)
 export const updateTenant = async (data: UpdateTenantRequest): Promise<ApiResponse<TenantDTO>> => {
-  return apiClient.patch<ApiResponse<TenantDTO>>('/tenants/current', data);
+  return apiClient.patch<ApiResponse<TenantDTO>>('/tenants', data);
 };
