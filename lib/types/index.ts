@@ -48,6 +48,18 @@ export type SessionUIState =
   | 'FAILED'
   | 'UNKNOWN';
 
+// Messages Page View Modes
+export type ViewMode = 'grouped' | 'flat';
+
+// Messages Page Sort Options
+export type SortMode = 'newest-first' | 'oldest-first' | 'by-contact';
+
+// Messages Page User Preferences
+export interface MessagePreferences {
+  viewMode: ViewMode;
+  sortMode: SortMode;
+}
+
 // ============================================
 // DTOs from Endpoints
 // ============================================
@@ -252,4 +264,32 @@ export interface UpdateProductRequest {
   aliases?: string[];
   categoryId?: string;
   isActive?: boolean;
+}
+
+// ============================================
+// Tenant (GET /tenants/:id, PATCH /tenants/:id)
+// ============================================
+
+export interface TenantDTO {
+  id: string;
+  name: string;
+  email: string;
+  conversationEnabled: boolean;
+  createdAt: string;
+}
+
+export interface UpdateTenantRequest {
+  conversationEnabled: boolean;
+}
+
+// ============================================
+// Bot Reply (POST /bot/incoming)
+// ============================================
+
+export type BotState = 'START' | 'MENU' | 'SELECT_ITEM' | 'CONFIRM' | 'COMPLETED' | 'IDLE';
+
+export interface BotReply {
+  reply: string;
+  language: 'es' | 'en';
+  state: BotState;
 }

@@ -23,6 +23,8 @@ import type {
   UpdateProductRequest,
   DashboardMetrics,
   UpdateOrderStatusRequest,
+  TenantDTO,
+  UpdateTenantRequest,
 } from '../types';
 
 // ============================================
@@ -185,3 +187,17 @@ export const deleteProduct = async (id: string): Promise<void> => {
 // ============================================
 
 export const clearToken = () => apiClient.clearToken();
+
+// ============================================
+// Tenant Endpoints
+// ============================================
+
+// GET /tenants/:id - Get current tenant settings (includes conversationEnabled)
+export const getTenant = async (): Promise<ApiResponse<TenantDTO>> => {
+  return apiClient.get<ApiResponse<TenantDTO>>('/tenants/current');
+};
+
+// PATCH /tenants/:id - Update tenant settings (toggle conversationEnabled)
+export const updateTenant = async (data: UpdateTenantRequest): Promise<ApiResponse<TenantDTO>> => {
+  return apiClient.patch<ApiResponse<TenantDTO>>('/tenants/current', data);
+};

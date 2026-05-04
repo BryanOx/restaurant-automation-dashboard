@@ -8,6 +8,7 @@ export { useOrderStats, type StatsPeriod } from './useOrderStats';
 export { useSessionsHealth } from './useSessionsHealth';
 export { useCustomers } from './useCustomers';
 export { useDashboardMetrics } from './useDashboardMetrics';
+export { useTenant, useUpdateTenant } from './useTenant';
 
 // Catalog hooks
 export { useCategories, useCreateCategory, useUpdateCategory, useDeleteCategory } from './useCategories';
