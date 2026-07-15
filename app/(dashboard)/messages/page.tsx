@@ -4,14 +4,26 @@
 // Messages Page - WhatsApp conversation history
 // ============================================
 
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Card, CardHeader, PageLoading } from '@/components/ui';
 import { ErrorState, EmptyState } from '@/components/ui';
-import { useMessages } from '@/lib/hooks';
+import { useGroupedMessages, useTenant, useUpdateTenant } from '@/lib/hooks';
 import { useAuth } from '@/lib/auth/AuthContext';
-import { MessageDTO } from '@/lib/types';
+import { MessageDTO, ViewMode, SortMode } from '@/lib/types';
 
-function MessageBubble({ message, isFromMe }: { message: MessageDTO; isFromMe: boolean }) {
+// localStorage keys
+const STORAGE_KEYS = {
+  viewMode: 'messages-view-mode',
+  sortMode: 'messages-sort-mode',
+} as const;
+
+// Default values
+const DEFAULT_VIEW_MODE: ViewMode = 'grouped';
+const DEFAULT_SORT_MODE: SortMode = 'newest-first';
+
+function MessageBubble({ message }: { message: MessageDTO }) {
+  // Use sender field from grouped endpoint: 'user' = customer sent, 'bot' = bot replied
+  const isFromMe = message.sender === 'bot';
   const isToday = (date: string) => {
     const d = new Date(date);
     const today = new Date();
@@ -25,7 +37,7 @@ function MessageBubble({ message, isFromMe }: { message: MessageDTO; isFromMe: b
       }`}>
         <p className="text-sm">{message.message}</p>
         <div className={`text-xs mt-1 ${isFromMe ? 'text-blue-100' : 'text-gray-500'}`}>
-          {message.from} • {isToday(message.timestamp) 
+          {isToday(message.timestamp) 
             ? new Date(message.timestamp).toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' })
             : new Date(message.timestamp).toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit' }) + ' ' + new Date(message.timestamp).toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' })
           }
@@ -38,7 +50,7 @@ function MessageBubble({ message, isFromMe }: { message: MessageDTO; isFromMe: b
 function MessageGroup({ phone, messages }: { phone: string; messages: MessageDTO[] }) {
   const [expanded, setExpanded] = useState(false);
   const displayed = expanded ? messages : messages.slice(-3);
-  const myPhone = messages[0]?.to || '';
+  // sender: 'user' = customer message, 'bot' = bot response
 
   return (
     <div className="border-b border-gray-100">
@@ -57,7 +69,7 @@ function MessageGroup({ phone, messages }: { phone: string; messages: MessageDTO
       {expanded && (
         <div className="px-4 pb-4">
           {displayed.map((m, i) => (
-            <MessageBubble key={i} message={m} isFromMe={m.from === myPhone} />
+            <MessageBubble key={i} message={m} />
           ))}
         </div>
       )}
@@ -65,26 +77,164 @@ function MessageGroup({ phone, messages }: { phone: string; messages: MessageDTO
   );
 }
 
+// Flat view message component - shows all messages in chronological list
+function FlatMessageItem({ message }: { message: MessageDTO }) {
+  // Use sender field from grouped endpoint: 'user' = customer, 'bot' = bot
+  const isFromMe = message.sender === 'bot';
+  const isToday = (date: string) => {
+    const d = new Date(date);
+    const today = new Date();
+    return d.toDateString() === today.toDateString();
+  };
+
+  return (
+    <div className={`flex ${isFromMe ? 'justify-end' : 'justify-start'} mb-4`}>
+      <div className={`max-w-[70%] rounded-lg p-3 ${
+        isFromMe ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-900'
+      }`}>
+        <p className="text-sm">{message.message}</p>
+        <div className={`text-xs mt-1 ${isFromMe ? 'text-blue-100' : 'text-gray-500'}`}>
+          <span className={isFromMe ? 'text-blue-200' : 'text-green-600'}>
+            {message.sender === 'bot' ? '🤖' : '👤'}
+          </span>
+          {' '}
+          {isToday(message.timestamp) 
+            ? new Date(message.timestamp).toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' })
+            : new Date(message.timestamp).toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit' }) + ' ' + new Date(message.timestamp).toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' })
+          }
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Toggle button component
+function ToggleGroup({ options, value, onChange }: { 
+  options: { value: string; label: string }[]; 
+  value: string; 
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+      {options.map((option, index) => (
+        <button
+          key={option.value}
+          onClick={() => onChange(option.value)}
+          className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+            value === option.value
+              ? 'bg-blue-600 text-white'
+              : 'bg-white text-gray-700 hover:bg-gray-50'
+          } ${index > 0 ? 'border-l border-gray-200' : ''}`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function MessagesPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { data, isLoading, error, refetch } = useMessages({ page: 1, limit: 100 }, !authLoading && isAuthenticated);
+  const { data: groupedData, isLoading, error, refetch } = useGroupedMessages({ page: 1, limit: 100 }, !authLoading && isAuthenticated);
+  
+  // Tenant (conversation engine toggle)
+  const { data: tenantData } = useTenant(!authLoading && isAuthenticated);
+  const updateTenant = useUpdateTenant();
+  const conversationEnabled = tenantData?.data?.conversationEnabled ?? true;
+
+  // State for view mode and sort mode
+  const [viewMode, setViewMode] = useState<ViewMode>(DEFAULT_VIEW_MODE);
+  const [sortMode, setSortMode] = useState<SortMode>(DEFAULT_SORT_MODE);
+
+  // Load preferences from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedViewMode = localStorage.getItem(STORAGE_KEYS.viewMode) as ViewMode | null;
+      const savedSortMode = localStorage.getItem(STORAGE_KEYS.sortMode) as SortMode | null;
+      
+      if (savedViewMode && (savedViewMode === 'grouped' || savedViewMode === 'flat')) {
+        setViewMode(savedViewMode);
+      }
+      if (savedSortMode && (savedSortMode === 'newest-first' || savedSortMode === 'oldest-first' || savedSortMode === 'by-contact')) {
+        setSortMode(savedSortMode);
+      }
+    } catch {
+      // localStorage unavailable - use defaults
+    }
+  }, []);
+
+  // Save preferences to localStorage when they change
+  const handleViewModeChange = (newMode: string) => {
+    const mode = newMode as ViewMode;
+    setViewMode(mode);
+    try {
+      localStorage.setItem(STORAGE_KEYS.viewMode, mode);
+    } catch {
+      // localStorage unavailable - ignore
+    }
+  };
+
+  const handleSortModeChange = (newMode: string) => {
+    const mode = newMode as SortMode;
+    setSortMode(mode);
+    try {
+      localStorage.setItem(STORAGE_KEYS.sortMode, mode);
+    } catch {
+      // localStorage unavailable - ignore
+    }
+  };
+
+  // Handle conversation engine toggle
+  const [toggleError, setToggleError] = useState<string | null>(null);
+  
+  const handleToggleConversation = async (enabled: boolean) => {
+    setToggleError(null);
+    try {
+      await updateTenant.mutateAsync({ conversationEnabled: enabled });
+    } catch (err) {
+      console.error('Failed to toggle conversation engine:', err);
+      setToggleError('Error al cambiar el estado del bot');
+      setTimeout(() => setToggleError(null), 3000);
+    }
+  };
 
   if (authLoading) return <PageLoading />;
   if (!isAuthenticated) return <div className="p-4">Redirigiendo al login...</div>;
 
-  const messages = data?.data?.messages || [];
+  // Pre-grouped messages from API (GET /messages/grouped)
+  // Keys = customer phone numbers, Values = conversation messages (sorted newest first)
+  const groupedMessages = groupedData?.data || {};
   
-  // Group by phone number
-  const grouped = messages.reduce((acc: Record<string, MessageDTO[]>, msg) => {
-    const key = msg.from || msg.to;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(msg);
-    // Sort by timestamp within each group
-    acc[key].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-    return acc;
-  }, {});
+  // Convert to array for rendering - sort by last message timestamp
+  const conversations = useMemo(() => {
+    const entries = Object.entries(groupedMessages);
+    
+    switch (sortMode) {
+      case 'newest-first':
+        // Already sorted by API, just return
+        return entries;
+      case 'oldest-first':
+        // Reverse the order within each group AND reverse group order
+        return entries.reverse();
+      case 'by-contact':
+        // Sort alphabetically by phone number
+        return entries.sort(([phoneA], [phoneB]) => phoneA.localeCompare(phoneB));
+      default:
+        return entries;
+    }
+  }, [groupedMessages, sortMode]);
 
-  const conversations = Object.entries(grouped);
+  // Flatten all messages from all groups for flat view
+  const flatMessages = useMemo(() => {
+    const allMessages: MessageDTO[] = [];
+    Object.values(groupedMessages).forEach((msgs) => {
+      allMessages.push(...msgs);
+    });
+    // Sort by timestamp (newest first by default)
+    return allMessages.sort((a, b) => 
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }, [groupedMessages]);
 
   return (
     <div className="space-y-6">
@@ -93,20 +243,90 @@ export default function MessagesPage() {
         <p className="text-sm text-gray-500">Historial de conversaciones de WhatsApp</p>
       </div>
 
+      {/* Controls */}
+      <div className="flex flex-wrap gap-4 items-center">
+        {/* Conversation Engine Toggle */}
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-600">Bot:</span>
+          <button
+            onClick={() => handleToggleConversation(!conversationEnabled)}
+            disabled={updateTenant.isPending}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              conversationEnabled ? 'bg-green-600' : 'bg-gray-300'
+            } ${updateTenant.isPending ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                conversationEnabled ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+          <span className={`text-xs font-medium ${conversationEnabled ? 'text-green-700' : 'text-gray-500'}`}>
+            {conversationEnabled ? 'Activo' : 'Desactivado'}
+          </span>
+          {toggleError && (
+            <span className="text-xs text-red-600">{toggleError}</span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-600">Ver:</span>
+          <ToggleGroup
+            options={[
+              { value: 'grouped', label: 'Agrupado' },
+              { value: 'flat', label: 'Todos' },
+            ]}
+            value={viewMode}
+            onChange={handleViewModeChange}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-600">Ordenar:</span>
+          <ToggleGroup
+            options={[
+              { value: 'newest-first', label: 'Más recientes' },
+              { value: 'oldest-first', label: 'Más antiguos' },
+              { value: 'by-contact', label: 'Por contacto' },
+            ]}
+            value={sortMode}
+            onChange={handleSortModeChange}
+          />
+        </div>
+      </div>
+
       <Card>
-        <CardHeader title="Conversaciones" subtitle={`${conversations.length} conversaciones`} />
+        <CardHeader 
+          title={viewMode === 'grouped' ? 'Conversaciones' : 'Todos los mensajes'} 
+          subtitle={viewMode === 'grouped' 
+            ? `${conversations.length} conversaciones` 
+            : `${flatMessages.length} mensajes`
+          } 
+        />
         {isLoading ? (
           <PageLoading text="Cargando mensajes..." />
         ) : error ? (
           <ErrorState message="Error al cargar mensajes" onRetry={() => refetch()} />
-        ) : conversations.length === 0 ? (
-          <EmptyState title="Sin mensajes" message="No hay mensajes registrados" />
+        ) : viewMode === 'grouped' ? (
+          conversations.length === 0 ? (
+            <EmptyState title="Sin mensajes" message="No hay mensajes registrados" />
+          ) : (
+            <div>
+              {conversations.map(([phone, msgs]) => (
+                <MessageGroup key={phone} phone={phone} messages={msgs} />
+              ))}
+            </div>
+          )
         ) : (
-          <div>
-            {conversations.map(([phone, msgs]) => (
-              <MessageGroup key={phone} phone={phone} messages={msgs} />
-            ))}
-          </div>
+          // Flat view - all messages in chronological list
+          flatMessages.length === 0 ? (
+            <EmptyState title="Sin mensajes" message="No hay mensajes registrados" />
+          ) : (
+            <div className="p-4">
+              {flatMessages.map((message, index) => (
+                <FlatMessageItem key={`${message.timestamp}-${index}`} message={message} />
+              ))}
+            </div>
+          )
         )}
       </Card>
     </div>
